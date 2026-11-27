@@ -41,6 +41,11 @@ import {
   economics,
   money,
   applyAction,
+  approveSpecGate,
+  rejectSpecGate,
+  submitCreativeRevision,
+  isPreLaunch,
+  needsSpecCheck,
   type Ad,
   type Action,
   type Status,
@@ -72,11 +77,15 @@ const statusClass = (s: Status) =>
     ? "badge-success"
     : s === "Review" || s === "Guardrails Active"
       ? "badge-warning"
-      : s === "Revision Sent"
+      : s === "Revision Sent" || s === "Pending Product Check"
         ? "badge-insight"
-        : s === "PDP Fix Applied"
-          ? "badge-teal"
-          : "badge-muted";
+        : s === "Changes Requested"
+          ? "badge-danger"
+          : s === "A/B Test Live"
+            ? "badge-success"
+            : s === "PDP Fix Applied"
+              ? "badge-teal"
+              : "badge-muted";
 const creativeIcons = { ugc: Video, reel: Video, carousel: Images, static: Image, search: Search };
 function Index() {
   const [ads, setAds] = useState<Ad[]>(() => initialAds.map((a) => ({ ...a })));
@@ -94,18 +103,39 @@ function Index() {
   const fixed = initialAds
     .filter((a) => a.status === "Review")
     .reduce((s, a) => s + (ads.find((r) => r.id === a.id)?.status !== "Review" ? a.spend : 0), 0);
-  const data = visible.map((a) => ({
-    name: a.short,
-    gross: a.grossRoas,
-    net: economics(a).netRoas,
-    profit: economics(a).netProfit / 100000,
-  }));
+  const pendingDrafts = ads.filter((a) => a.isDraft && needsSpecCheck(a)).length;
+  const data = visible
+    .filter((a) => a.spend > 0 || !a.isDraft)
+    .map((a) => ({
+      name: a.short,
+      gross: a.grossRoas,
+      net: economics(a).netRoas,
+      profit: economics(a).netProfit / 100000,
+    }));
   function act(action: Action) {
     if (!selected) return;
     setAds((previous) => applyAction(previous, selected.id, action));
     setNotice(
       `${selected.name}: ${action === "pause" ? "budget reallocated — total spend protected" : action === "creative" ? "revision brief sent" : action === "pdp" ? "PDP fix applied" : "guardrails activated"}.`,
     );
+    setReview(undefined);
+  }
+  function approve() {
+    if (!selected) return;
+    setAds((previous) => approveSpecGate(previous, selected.id));
+    setNotice(`${selected.name}: approved for launch — A/B test is live.`);
+    setReview(undefined);
+  }
+  function reject() {
+    if (!selected) return;
+    setAds((previous) => rejectSpecGate(previous, selected.id));
+    setNotice(`${selected.name}: changes requested — WhatsApp fix note copied.`);
+    setReview(undefined);
+  }
+  function revise(brief: string) {
+    if (!selected) return;
+    setAds((previous) => submitCreativeRevision(previous, selected.id, brief));
+    setNotice(`${selected.name}: revision brief sent — v2 queued for Product Check.`);
     setReview(undefined);
   }
   function reset() {
@@ -156,6 +186,12 @@ function Index() {
                 <span className="badge badge-warning">
                   <CircleAlert size={11} /> Sample Pilot Data Mode
                 </span>
+                {pendingDrafts > 0 && (
+                  <span className="badge badge-insight">
+                    <ShieldCheck size={11} /> {pendingDrafts} Draft
+                    {pendingDrafts > 1 ? "s" : ""} Pending Spec Check
+                  </span>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button size="icon" variant="ghost" aria-label="Assumptions / Pilot Model">
@@ -328,6 +364,8 @@ function Index() {
                   <tbody>
                     {visible.map((ad) => {
                       const e = economics(ad);
+                      const pre = isPreLaunch(ad);
+                      const live = ad.status === "A/B Test Live";
                       const Icon = creativeIcons[ad.kind];
                       return (
                         <tr key={ad.id} className={ad.status === "Paused" ? "opacity-50" : ""}>
@@ -350,46 +388,69 @@ function Index() {
                               </div>
                             </div>
                           </td>
-                          <td className="numeric font-semibold">{money(ad.spend)}</td>
-                          <td className="numeric font-bold">{ad.grossRoas.toFixed(1)}x</td>
-                          <td>
-                            <span
-                              className={`badge ${ad.returnRate > 20 ? "badge-danger" : ad.returnRate < 12 ? "badge-success" : "badge-warning"} numeric`}
-                            >
-                              {ad.returnRate}%
-                            </span>
-                            <input
-                              type="range"
-                              min={5}
-                              max={50}
-                              value={ad.returnRate}
-                              disabled={ad.status === "Paused"}
-                              aria-label={`${ad.name} return rate`}
-                              className={`rate-slider ${ad.returnRate < 12 ? "healthy" : ""}`}
-                              onChange={(event) =>
-                                setAds((previous) =>
-                                  previous.map((a) =>
-                                    a.id === ad.id
-                                      ? { ...a, returnRate: Number(event.target.value) }
-                                      : a,
-                                  ),
-                                )
-                              }
-                            />
-                          </td>
-                          <td className="numeric font-bold">{e.netRoas.toFixed(2)}x</td>
-                          <td>
-                            <div
-                              className={`font-bold numeric ${e.netMarginPct >= 15 ? "text-success" : e.netMarginPct < 10 ? "text-danger" : "text-warning"}`}
-                            >
-                              {money(e.netProfit)}
-                            </div>
-                            <span
-                              className={`badge mt-1 numeric ${e.netMarginPct >= 15 ? "badge-success" : e.netMarginPct < 10 ? "badge-danger" : "badge-warning"}`}
-                            >
-                              {e.netMarginPct.toFixed(1)}%
-                            </span>
-                          </td>
+                          {pre ? (
+                            <>
+                              <td>
+                                <div className="numeric font-semibold">₹0</div>
+                                <div className="text-[9px] text-muted-foreground mt-1">
+                                  {live ? "Unlocked" : "Pre-launch lock"}
+                                </div>
+                              </td>
+                              <td className="numeric text-muted-foreground">—</td>
+                              <td>
+                                <span className="badge badge-muted numeric">
+                                  Est. {ad.returnRate}%
+                                </span>
+                              </td>
+                              <td className="numeric text-muted-foreground">—</td>
+                              <td className="text-[10px] text-muted-foreground">
+                                {live ? "Specs verified" : "Awaiting spec check"}
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="numeric font-semibold">{money(ad.spend)}</td>
+                              <td className="numeric font-bold">{ad.grossRoas.toFixed(1)}x</td>
+                              <td>
+                                <span
+                                  className={`badge ${ad.returnRate > 20 ? "badge-danger" : ad.returnRate < 12 ? "badge-success" : "badge-warning"} numeric`}
+                                >
+                                  {ad.returnRate}%
+                                </span>
+                                <input
+                                  type="range"
+                                  min={5}
+                                  max={50}
+                                  value={ad.returnRate}
+                                  disabled={ad.status === "Paused"}
+                                  aria-label={`${ad.name} return rate`}
+                                  className={`rate-slider ${ad.returnRate < 12 ? "healthy" : ""}`}
+                                  onChange={(event) =>
+                                    setAds((previous) =>
+                                      previous.map((a) =>
+                                        a.id === ad.id
+                                          ? { ...a, returnRate: Number(event.target.value) }
+                                          : a,
+                                      ),
+                                    )
+                                  }
+                                />
+                              </td>
+                              <td className="numeric font-bold">{e.netRoas.toFixed(2)}x</td>
+                              <td>
+                                <div
+                                  className={`font-bold numeric ${e.netMarginPct >= 15 ? "text-success" : e.netMarginPct < 10 ? "text-danger" : "text-warning"}`}
+                                >
+                                  {money(e.netProfit)}
+                                </div>
+                                <span
+                                  className={`badge mt-1 numeric ${e.netMarginPct >= 15 ? "badge-success" : e.netMarginPct < 10 ? "badge-danger" : "badge-warning"}`}
+                                >
+                                  {e.netMarginPct.toFixed(1)}%
+                                </span>
+                              </td>
+                            </>
+                          )}
                           <td>
                             <span className={`badge ${statusClass(ad.status)} text-[8px]`}>
                               {ad.status === "Keep / Scale" && <ArrowUpRight size={10} />}{" "}
@@ -402,7 +463,11 @@ function Index() {
                               aria-label={`Review ${ad.name}`}
                               onClick={() => setReview(ad.id)}
                             >
-                              {ad.status === "Review" ? "Review" : "Inspect"}
+                              {pre && needsSpecCheck(ad)
+                                ? "Check Specs"
+                                : ad.status === "Review"
+                                  ? "Review"
+                                  : "Inspect"}
                               <ChevronRight size={11} />
                             </Button>
                           </td>
@@ -617,6 +682,9 @@ function Index() {
           ad={selected}
           onClose={() => setReview(undefined)}
           onAction={act}
+          onApprove={approve}
+          onReject={reject}
+          onRevise={revise}
           canPause={ads.some(
             (a) => a.id !== selected?.id && a.status === "Keep / Scale" && a.spend > 0,
           )}

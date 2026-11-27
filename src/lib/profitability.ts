@@ -1,5 +1,13 @@
 export type Status =
-  "Review" | "Keep / Scale" | "Revision Sent" | "PDP Fix Applied" | "Guardrails Active" | "Paused";
+  | "Review"
+  | "Keep / Scale"
+  | "Revision Sent"
+  | "PDP Fix Applied"
+  | "Guardrails Active"
+  | "Paused"
+  | "Pending Product Check"
+  | "A/B Test Live"
+  | "Changes Requested";
 export type Ad = {
   id: string;
   name: string;
@@ -15,8 +23,41 @@ export type Ad = {
   flag: string;
   brief: string;
   kind: "ugc" | "reel" | "carousel" | "static" | "search";
+  isDraft?: boolean;
+  autoScanFindings?: string[];
+  specChecklist?: string[];
+  whatsappRejectNote?: string;
 };
+const defaultChecklist = [
+  "Laptop & dimension claim matches official SKU spec (15.6-inch)",
+  "True daylight colour accuracy verified (no warm filter on Sage/Rose)",
+  "Realistic packing load & person-scale reference shown",
+];
 export const initialAds: Ad[] = [
+  {
+    id: "launch-v2",
+    name: "Commuter 28L Launch Reel v2",
+    short: "Launch v2",
+    channel: "Meta · Draft Reel",
+    sku: "Commuter 28L · Sage Green",
+    spend: 0,
+    grossRoas: 3.4,
+    returnRate: 16,
+    status: "Pending Product Check",
+    isDraft: true,
+    qc: 80,
+    kind: "reel",
+    complaints: [],
+    flag: "Pre-launch draft held at the Product Team spec gate.",
+    brief: "Correct laptop-fit overlay and colour grading before launch.",
+    autoScanFindings: [
+      "Overlay text claims 'Fits up to 16-inch laptops' — official Shopify Commuter 28L spec is 15.6-inch.",
+      "Warm sunset colour grading detected on Sage Green frames (historically linked to 'looks grey' complaints).",
+    ],
+    specChecklist: defaultChecklist,
+    whatsappRejectNote:
+      "Hold on Commuter 28L Launch Reel v2 before spend goes live: please fix the '16-inch' overlay to '15.6-inch' and swap warm-graded Sage Green clips for neutral daylight shots.",
+  },
   {
     id: "riya",
     name: "Riya’s UGC Video",
@@ -203,6 +244,44 @@ export function applyAction(ads: Ad[], id: string, action: Action): Ad[] {
         }
       : a,
   );
+}
+export const isPreLaunch = (a: Ad) => Boolean(a.isDraft) && a.spend === 0;
+export const needsSpecCheck = (a: Ad) =>
+  a.status === "Pending Product Check" || a.status === "Changes Requested";
+export function approveSpecGate(ads: Ad[], id: string): Ad[] {
+  return ads.map((a) =>
+    a.id === id && a.isDraft && needsSpecCheck(a)
+      ? { ...a, status: "A/B Test Live", autoScanFindings: [] }
+      : a,
+  );
+}
+export function rejectSpecGate(ads: Ad[], id: string): Ad[] {
+  return ads.map((a) =>
+    a.id === id && a.isDraft && needsSpecCheck(a) ? { ...a, status: "Changes Requested" } : a,
+  );
+}
+export function submitCreativeRevision(ads: Ad[], id: string, brief: string): Ad[] {
+  const live = ads.find((a) => a.id === id);
+  if (!live || live.isDraft || live.status === "Paused") return ads;
+  const revised = applyAction(ads, id, "creative").map((a) =>
+    a.id === id ? { ...a, brief: brief.trim() || a.brief } : a,
+  );
+  const draftId = `${id}-v2`;
+  const draft: Ad = {
+    ...live,
+    id: draftId,
+    name: `${live.name} (v2 Fix)`,
+    short: `${live.short} v2`,
+    channel: `${live.channel.split(" · ")[0]} · Draft v2`,
+    spend: 0,
+    status: "Pending Product Check",
+    isDraft: true,
+    brief: brief.trim() || live.brief,
+    autoScanFindings: [],
+    specChecklist: defaultChecklist,
+    whatsappRejectNote: `Hold on ${live.name} (v2 Fix) before spend goes live: please recheck the revised creative against the official 15.6-inch spec and daylight colour references.`,
+  };
+  return [draft, ...revised.filter((a) => a.id !== draftId)];
 }
 export const money = (n: number) => `${n < 0 ? "−" : ""}₹${(Math.abs(n) / 100000).toFixed(1)}L`;
 export const rupees = (n: number) => `₹${n.toLocaleString("en-IN")}`;

@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { initialAds, economics, aggregate, applyAction } from "./profitability";
+import {
+  initialAds,
+  economics,
+  aggregate,
+  applyAction,
+  approveSpecGate,
+  rejectSpecGate,
+  submitCreativeRevision,
+} from "./profitability";
 describe("Pilot unit economics", () => {
   it("uses the specified order, return and cost formula", () => {
     expect(economics({ spend: 1000000, grossRoas: 4.5, returnRate: 36 })).toMatchObject({
@@ -65,5 +73,41 @@ describe("Pilot unit economics", () => {
     expect(economics({ spend: 0, grossRoas: 4.5, returnRate: 50 }).netMarginPct).toBe(0);
     expect(economics({ spend: 1000000, grossRoas: 4.5, returnRate: 0 }).returnedOrders).toBe(0);
     expect(economics({ spend: 1000000, grossRoas: 4.5, returnRate: 50 }).returnedOrders).toBe(900);
+  });
+});
+describe("Pre-launch spec gate", () => {
+  it("keeps the ₹0 pending draft out of the ₹37L and 30.4% baseline", () => {
+    expect(initialAds[0]).toMatchObject({ status: "Pending Product Check", spend: 0 });
+    expect(aggregate(initialAds).spend).toBe(3700000);
+    expect(aggregate(initialAds).returnRate).toBeCloseTo(30.4, 1);
+  });
+  it("approves a draft to A/B Test Live and clears findings", () => {
+    const next = approveSpecGate(initialAds, "launch-v2");
+    expect(next[0]).toMatchObject({ status: "A/B Test Live", autoScanFindings: [] });
+  });
+  it("rejects a draft as Changes Requested without touching live ads", () => {
+    const next = rejectSpecGate(initialAds, "launch-v2");
+    expect(next[0]?.status).toBe("Changes Requested");
+    expect(rejectSpecGate(initialAds, "riya")).toEqual(initialAds);
+  });
+  it("sends a creative revision and queues one v2 draft at the top", () => {
+    const next = submitCreativeRevision(initialAds, "riya", "New brief");
+    expect(next[0]).toMatchObject({
+      id: "riya-v2",
+      name: "Riya’s UGC Video (v2 Fix)",
+      spend: 0,
+      status: "Pending Product Check",
+      isDraft: true,
+      autoScanFindings: [],
+    });
+    expect(next.find((a) => a.id === "riya")).toMatchObject({
+      status: "Revision Sent",
+      returnRate: 22,
+      brief: "New brief",
+    });
+    expect(aggregate(next).spend).toBe(3700000);
+    const again = submitCreativeRevision(next, "riya", "Second");
+    expect(again.filter((a) => a.id === "riya-v2")).toHaveLength(1);
+    expect(again.find((a) => a.id === "riya")?.returnRate).toBe(11);
   });
 });

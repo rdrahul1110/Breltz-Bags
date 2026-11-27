@@ -32,3 +32,4 @@ use the editor.
 ## Dashboard architecture
 - Keep demo unit economics and budget actions in a pure browser-safe module with focused tests, so all dashboard views share one calculation model.
 - Keep this illustrative prototype in React state without external services; reset must restore the original sample model.
+- Pre-launch drafts carry spend 0 and are hidden from the chart, so spec-gate rows never change live KPI totals.
