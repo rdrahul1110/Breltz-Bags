@@ -28,3 +28,7 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
+
+## Dashboard architecture
+- Keep demo unit economics and budget actions in a pure browser-safe module with focused tests, so all dashboard views share one calculation model.
+- Keep this illustrative prototype in React state without external services; reset must restore the original sample model.
